@@ -5,9 +5,11 @@
 // por cuenta y valores mayores que cero.
 
 generator client {
-  provider     = "prisma-client"
-  output       = "../src/generated/prisma"
-  moduleFormat = "cjs"
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "cjs"
+  // Imports sin extensión, como el resto del código CommonJS; Jest no resuelve `.js` hacia `.ts`.
+  importFileExtension = ""
 }
 
 datasource db {
