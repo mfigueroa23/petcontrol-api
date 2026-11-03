@@ -1,0 +1,13 @@
+// Esquema de la base de datos de Control de Mascotas.
+// Implementa la Vista de Datos (SDD 5.6) con Prisma (ADR-005).
+// Las restricciones que Prisma no expresa se agregan con SQL manual en las migraciones.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
