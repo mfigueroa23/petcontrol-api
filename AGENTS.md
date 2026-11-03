@@ -7,6 +7,8 @@ utilizando una arquitectura monolitica con ORM y base de datos relacional.
 
 - Iniciar el proyecto: `pnpm run start:dev`
 - Ejecutar test unitarios: `pnpm run test`
+- Ejecutar test de integracion: `pnpm run test:e2e`
+- Ejecutar lint (ESLint): `pnpm run lint`
 - Ejecutar formato de codigo: `pnpm run format`
 
 ## Reglas de desarollo
