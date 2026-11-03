@@ -1,2 +1,7 @@
 allowBuilds:
   '@parcel/watcher': true
+  '@prisma/engines': true
+  argon2: true
+  # tsx usa el binario precompilado de @esbuild/<plataforma>; su script de instalación no es necesario.
+  esbuild: false
+  prisma: true

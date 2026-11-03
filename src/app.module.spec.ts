@@ -14,11 +14,16 @@ import { AdminMetricsModule } from './admin-metrics/admin-metrics.module';
 import { AuditMetricsModule } from './audit-metrics/audit-metrics.module';
 import { ActionLogModule } from './action-log/action-log.module';
 import { MailModule } from './mail/mail.module';
+import { PrismaModule } from './prisma/prisma.module';
 
 describe('AppModule', () => {
   let moduleRef: TestingModule;
+  const originalUrl = process.env.DATABASE_URL;
 
   beforeAll(async () => {
+    // PrismaService exige la URL, pero compile() no conecta a la base de datos.
+    process.env.DATABASE_URL =
+      'postgresql://user:password@localhost:5432/petcontrol';
     moduleRef = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
@@ -26,9 +31,11 @@ describe('AppModule', () => {
 
   afterAll(async () => {
     await moduleRef.close();
+    process.env.DATABASE_URL = originalUrl;
   });
 
   it.each([
+    ['PrismaModule', PrismaModule],
     ['AuthModule', AuthModule],
     ['AccountsModule', AccountsModule],
     ['VetRequestsModule', VetRequestsModule],

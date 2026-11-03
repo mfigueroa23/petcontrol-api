@@ -1,0 +1,323 @@
+// Esquema de la base de datos de Control de Mascotas.
+// Implementa la Vista de Datos (SDD 5.6) con Prisma (ADR-005).
+// Las restricciones que Prisma no expresa se agregan con SQL manual en las migraciones:
+// nombre de tipo sin distinguir mayúsculas, un peso por mes, una solicitud pendiente
+// por cuenta y valores mayores que cero.
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "cjs"
+  // Imports sin extensión, como el resto del código CommonJS; Jest no resuelve `.js` hacia `.ts`.
+  importFileExtension = ""
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+/// Estado de la cuenta (SDD 5.7).
+enum AccountStatus {
+  PENDING_CONFIRMATION @map("pending_confirmation")
+  ENABLED              @map("enabled")
+  DISABLED             @map("disabled")
+
+  @@map("account_status")
+}
+
+/// Roles de una cuenta. Una cuenta puede tener varios (REQ-027).
+enum Role {
+  USER    @map("user")
+  VET     @map("vet")
+  ADMIN   @map("admin")
+  AUDITOR @map("auditor")
+
+  @@map("role")
+}
+
+/// Propósito de un enlace enviado por correo.
+enum AccountTokenType {
+  EMAIL_CONFIRMATION @map("email_confirmation")
+  PASSWORD_RESET     @map("password_reset")
+  EMAIL_CHANGE       @map("email_change")
+
+  @@map("account_token_type")
+}
+
+/// Estado de una solicitud del rol Veterinario (SDD 5.7).
+enum VetRoleRequestStatus {
+  PENDING  @map("pending")
+  APPROVED @map("approved")
+  REJECTED @map("rejected")
+
+  @@map("vet_role_request_status")
+}
+
+enum PetSex {
+  MALE   @map("male")
+  FEMALE @map("female")
+
+  @@map("pet_sex")
+}
+
+/// Tipo de desparasitación (REQ-042).
+enum DewormingKind {
+  INTERNAL @map("internal")
+  EXTERNAL @map("external")
+
+  @@map("deworming_kind")
+}
+
+/// Acciones administrativas que se registran (SDD 7.13).
+enum AdminActionType {
+  ROLE_ASSIGNED        @map("role_assigned")
+  ROLE_REMOVED         @map("role_removed")
+  ACCOUNT_DEACTIVATED  @map("account_deactivated")
+  ACCOUNT_REACTIVATED  @map("account_reactivated")
+  RUT_CORRECTED        @map("rut_corrected")
+  VET_REQUEST_APPROVED @map("vet_request_approved")
+  VET_REQUEST_REJECTED @map("vet_request_rejected")
+
+  @@map("admin_action_type")
+}
+
+// ---------------------------------------------------------------------------
+// Cuentas y acceso
+// ---------------------------------------------------------------------------
+
+model Account {
+  id                String        @id @default(uuid(7)) @db.Uuid
+  fullName          String        @map("full_name")
+  /// Normalizado, sin puntos y con guion: 12345678-5.
+  rut               String        @unique @db.VarChar(10)
+  /// Guardado en minúsculas.
+  email             String        @unique @db.VarChar(254)
+  passwordHash      String        @map("password_hash")
+  birthDate         DateTime      @map("birth_date") @db.Date
+  status            AccountStatus @default(PENDING_CONFIRMATION)
+  privacyAcceptedAt DateTime      @map("privacy_accepted_at") @db.Timestamptz(3)
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  roles           AccountRole[]
+  sessions        Session[]
+  tokens          AccountToken[]
+  vetRoleRequests VetRoleRequest[]
+  pets            Pet[]
+  linkedPetVets   PetVet[]
+
+  @@map("accounts")
+}
+
+model AccountRole {
+  accountId String @map("account_id") @db.Uuid
+  role      Role
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@id([accountId, role])
+  @@map("account_roles")
+}
+
+/// Sesión con cookie HttpOnly (ADR-003). Solo se guarda el hash del token.
+model Session {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  accountId      String   @map("account_id") @db.Uuid
+  tokenHash      String   @unique @map("token_hash")
+  lastActivityAt DateTime @default(now()) @map("last_activity_at") @db.Timestamptz(3)
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+  @@map("sessions")
+}
+
+/// Enlaces de confirmación, recuperación y cambio de correo. Solo se guarda el hash del token.
+model AccountToken {
+  id        String           @id @default(uuid(7)) @db.Uuid
+  accountId String           @map("account_id") @db.Uuid
+  type      AccountTokenType
+  tokenHash String           @unique @map("token_hash")
+  /// Solo para EMAIL_CHANGE.
+  newEmail  String?          @map("new_email") @db.VarChar(254)
+  expiresAt DateTime         @map("expires_at") @db.Timestamptz(3)
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+  @@map("account_tokens")
+}
+
+/// Una cuenta tiene como máximo una solicitud pendiente (índice parcial en SQL manual).
+model VetRoleRequest {
+  id              String               @id @default(uuid(7)) @db.Uuid
+  accountId       String               @map("account_id") @db.Uuid
+  status          VetRoleRequestStatus @default(PENDING)
+  rejectionReason String?              @map("rejection_reason")
+  createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  resolvedAt      DateTime?            @map("resolved_at") @db.Timestamptz(3)
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+  @@index([status])
+  @@map("vet_role_requests")
+}
+
+// ---------------------------------------------------------------------------
+// Mascotas y carnet
+// ---------------------------------------------------------------------------
+
+/// El nombre no se repite sin distinguir mayúsculas (índice por expresión en SQL manual).
+/// Los tipos no se eliminan, solo se desactivan.
+model PetType {
+  id     String  @id @default(uuid(7)) @db.Uuid
+  name   String
+  active Boolean @default(true)
+
+  pets Pet[]
+
+  @@map("pet_types")
+}
+
+model Pet {
+  id         String    @id @default(uuid(7)) @db.Uuid
+  ownerId    String    @map("owner_id") @db.Uuid
+  petTypeId  String    @map("pet_type_id") @db.Uuid
+  name       String
+  breed      String?
+  color      String?
+  /// 15 dígitos (REQ-034). Único cuando está informado.
+  chipNumber String?   @unique @map("chip_number") @db.VarChar(15)
+  sterilized Boolean?
+  birthDate  DateTime? @map("birth_date") @db.Date
+  sex        PetSex?
+
+  owner   Account @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  petType PetType @relation(fields: [petTypeId], references: [id], onDelete: Restrict)
+
+  vet            PetVet?
+  vaccines       Vaccine[]
+  dewormings     Deworming[]
+  foodPurchases  FoodPurchase[]
+  treatPurchases TreatPurchase[]
+  weights        Weight[]
+
+  @@index([ownerId])
+  @@index([petTypeId])
+  @@map("pets")
+}
+
+/// Veterinario del carnet (SDD 5.6). Los campos entered_* solo los ve el dueño (REQ-060).
+model PetVet {
+  petId           String  @id @map("pet_id") @db.Uuid
+  enteredName     String? @map("entered_name")
+  /// Normalizado, sin puntos y con guion: 12345678-5.
+  enteredRut      String? @map("entered_rut") @db.VarChar(10)
+  /// Formato +56 seguido de 9 dígitos (REQ-059).
+  enteredPhone    String? @map("entered_phone") @db.VarChar(12)
+  linkedAccountId String? @map("linked_account_id") @db.Uuid
+  linkDeclined    Boolean @default(false) @map("link_declined")
+
+  pet           Pet      @relation(fields: [petId], references: [id], onDelete: Cascade)
+  linkedAccount Account? @relation(fields: [linkedAccountId], references: [id], onDelete: SetNull)
+
+  @@index([enteredRut])
+  @@index([linkedAccountId])
+  @@map("pet_vets")
+}
+
+// ---------------------------------------------------------------------------
+// Historial de la mascota: una tabla por tipo de registro (ADR-006)
+// ---------------------------------------------------------------------------
+
+model Vaccine {
+  id         String    @id @default(uuid(7)) @db.Uuid
+  petId      String    @map("pet_id") @db.Uuid
+  name       String
+  appliedOn  DateTime  @map("applied_on") @db.Date
+  nextDoseOn DateTime? @map("next_dose_on") @db.Date
+
+  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  @@index([petId, appliedOn])
+  @@map("vaccines")
+}
+
+model Deworming {
+  id         String        @id @default(uuid(7)) @db.Uuid
+  petId      String        @map("pet_id") @db.Uuid
+  product    String
+  kind       DewormingKind
+  appliedOn  DateTime      @map("applied_on") @db.Date
+  nextDoseOn DateTime?     @map("next_dose_on") @db.Date
+
+  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  @@index([petId, appliedOn])
+  @@map("dewormings")
+}
+
+/// quantity_kg y price_clp mayores que cero (CHECK en SQL manual).
+model FoodPurchase {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  petId       String   @map("pet_id") @db.Uuid
+  product     String
+  purchasedOn DateTime @map("purchased_on") @db.Date
+  quantityKg  Decimal  @map("quantity_kg") @db.Decimal(6, 2)
+  priceClp    Int?     @map("price_clp")
+
+  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  @@index([petId, purchasedOn])
+  @@map("food_purchases")
+}
+
+/// quantity_units y price_clp mayores que cero (CHECK en SQL manual).
+model TreatPurchase {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  petId         String   @map("pet_id") @db.Uuid
+  product       String
+  purchasedOn   DateTime @map("purchased_on") @db.Date
+  quantityUnits Int      @map("quantity_units")
+  priceClp      Int?     @map("price_clp")
+
+  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  @@index([petId, purchasedOn])
+  @@map("treat_purchases")
+}
+
+/// Un peso por mascota y mes calendario (índice por expresión en SQL manual).
+/// weight_kg mayor que cero, con hasta 2 decimales (REQ-045).
+model Weight {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  petId      String   @map("pet_id") @db.Uuid
+  measuredOn DateTime @map("measured_on") @db.Date
+  weightKg   Decimal  @map("weight_kg") @db.Decimal(5, 2)
+
+  pet Pet @relation(fields: [petId], references: [id], onDelete: Cascade)
+
+  @@index([petId, measuredOn])
+  @@map("weights")
+}
+
+// ---------------------------------------------------------------------------
+// Registro de acciones administrativas
+// ---------------------------------------------------------------------------
+
+/// Sin claves foráneas: se conserva si se elimina una cuenta (SDD 5.6).
+/// No guarda nombres, RUT ni correos (REQ-080). Se borra a los 2 años (REQ-087).
+model AdminAction {
+  id              String          @id @default(uuid(7)) @db.Uuid
+  actorAccountId  String          @map("actor_account_id") @db.Uuid
+  targetAccountId String          @map("target_account_id") @db.Uuid
+  action          AdminActionType
+  occurredAt      DateTime        @default(now()) @map("occurred_at") @db.Timestamptz(3)
+
+  @@index([occurredAt])
+  @@map("admin_actions")
+}

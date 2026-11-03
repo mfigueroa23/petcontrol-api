@@ -15,9 +15,11 @@ import { AdminMetricsModule } from './admin-metrics/admin-metrics.module';
 import { AuditMetricsModule } from './audit-metrics/audit-metrics.module';
 import { ActionLogModule } from './action-log/action-log.module';
 import { MailModule } from './mail/mail.module';
+import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
   imports: [
+    PrismaModule,
     AuthModule,
     AccountsModule,
     VetRequestsModule,
