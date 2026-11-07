@@ -1,5 +1,6 @@
 # Pipeline de integración continua (CDM-3, SDD 5.4).
-# En cada PR y push a main: formato, lint, pruebas unitarias y compilación.
+# En cada PR y push a main: formato, lint, pruebas unitarias, compilación y
+# pruebas de integración con una base de datos PostgreSQL temporal.
 name: CI
 
 on:
@@ -80,3 +81,44 @@ jobs:
 
       - name: Compilar
         run: pnpm build
+
+  integration:
+    name: Pruebas de integración
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Base de datos temporal del entorno de integración continua (ADR-011).
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: petcontrol
+          POSTGRES_PASSWORD: petcontrol
+          POSTGRES_DB: petcontrol
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U petcontrol -d petcontrol"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://petcontrol:petcontrol@localhost:5432/petcontrol?schema=public
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      # Aplica las migraciones como en Producción, incluido su SQL manual.
+      - name: Aplicar las migraciones
+        run: pnpm db:deploy
+
+      - name: Pruebas de integración
+        run: pnpm test:e2e
