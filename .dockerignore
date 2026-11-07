@@ -1,0 +1,16 @@
+.git
+.github
+.vscode
+.idea
+node_modules
+dist
+coverage
+src/generated
+test
+prisma/seed.ts
+*.tsbuildinfo
+.env
+.env.*
+Dockerfile
+.dockerignore
+*.md

@@ -184,6 +184,9 @@ importers:
       argon2:
         specifier: 0.45.1
         version: 0.45.1
+      prisma:
+        specifier: 7.10.1
+        version: 7.10.1(@types/node@24.19.2)(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@6.0.3)
       reflect-metadata:
         specifier: ^0.2.2
         version: 0.2.2
@@ -236,9 +239,6 @@ importers:
       prettier:
         specifier: ^3.4.2
         version: 3.9.10
-      prisma:
-        specifier: 7.10.1
-        version: 7.10.1(@types/node@24.19.2)(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@6.0.3)
       source-map-support:
         specifier: ^0.5.21
         version: 0.5.21
