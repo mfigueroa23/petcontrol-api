@@ -1,6 +1,7 @@
 # Pipeline de integración continua (CDM-3, SDD 5.4).
 # En cada PR y push a main: formato, lint, pruebas unitarias, compilación y
-# pruebas de integración con una base de datos PostgreSQL temporal.
+# pruebas de integración con una base de datos PostgreSQL temporal, y prueba de
+# humo de la imagen construida (migraciones y arranque de la API).
 name: CI
 
 on:
@@ -122,3 +123,71 @@ jobs:
 
       - name: Pruebas de integración
         run: pnpm test:e2e
+
+  # Prueba la imagen que se publicará: migraciones como el initContainer de
+  # Kubernetes (SDD 5.5) y arranque de la API contra una base de datos temporal.
+  smoke:
+    name: Prueba de humo de la imagen
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: petcontrol
+          POSTGRES_PASSWORD: petcontrol
+          POSTGRES_DB: petcontrol
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U petcontrol -d petcontrol"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://petcontrol:petcontrol@localhost:5432/petcontrol?schema=public
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Construir la imagen
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: ${{ env.IMAGE_NAME }}:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Los contenedores usan la red del runner para llegar al servicio postgres.
+      - name: Aplicar las migraciones con la imagen
+        run: docker run --rm --network host -e DATABASE_URL "$IMAGE_NAME:ci" ./node_modules/.bin/prisma migrate deploy
+
+      # La API solo inicia si se conecta a la base de datos (PrismaService).
+      - name: Levantar la API
+        run: |
+          docker run -d --name api --network host -e DATABASE_URL "$IMAGE_NAME:ci"
+          timeout 30 sh -c 'until curl -fs http://localhost:3000/healthz; do sleep 1; done'
+
+      - name: Comprobar la ruta de salud
+        run: |
+          RESPONSE=$(curl -fsS http://localhost:3000/healthz)
+          if [ "$RESPONSE" != "ok" ]; then
+            echo "::error::La ruta de salud respondió '$RESPONSE' en lugar de 'ok'."
+            exit 1
+          fi
+          echo "La API respondió ok."
+
+      - name: Comprobar que la API no se ejecute como root
+        run: |
+          USER_ID=$(docker exec api id -u)
+          if [ "$USER_ID" = "0" ]; then
+            echo "::error::El contenedor de la API se ejecuta como root."
+            exit 1
+          fi
+          echo "La API se ejecuta con el usuario $USER_ID."
+
+      - name: Logs del contenedor
+        if: failure()
+        run: docker logs api
