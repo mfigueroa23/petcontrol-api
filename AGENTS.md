@@ -17,6 +17,10 @@ utilizando una arquitectura monolitica con ORM y base de datos relacional.
 - No trabajar en la rama `main`, crear una rama con el nombre de la tarea a realizar `<type>/<JIRA-TICKET-KEY>-<tarea>`.
 - Tickets de desarrollo en JIRA el proyecto con clave `CDM`
 - Documentacion (SRS, SDD y TD) en Confluence con la clave `CDM`.
+- Trabajo en pair programming: cada tarea se divide en pasos minimos verificables.
+  Claude realiza un paso y se detiene para que el desarrollador lo revise; si lo aprueba
+  se hace commit y se pasa al siguiente, de lo contrario se itera sobre el mismo paso
+  hasta que quede aprobado. No se hace commit ni se avanza sin aprobacion explicita.
 - Estructura del proyecto:
   - `src/<modulo>`: Modulos de la aplicacion.
   - `src/<modulo>/controllers`: Controladores de la aplicacion.
