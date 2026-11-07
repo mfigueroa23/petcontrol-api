@@ -23,6 +23,15 @@ describe('AppController (e2e)', () => {
       .expect('Hello World!');
   });
 
+  it('/healthz (GET)', () => {
+    return request(app.getHttpServer())
+      .get('/healthz')
+      .expect(200)
+      .expect('Content-Type', /^text\/plain/)
+      .expect('Cache-Control', 'no-store')
+      .expect('ok');
+  });
+
   afterEach(async () => {
     await app.close();
   });
