@@ -42,6 +42,9 @@ pnpm run db:migrate   # aplica las migraciones
 ## Estructura del proyecto
 
 ```text
+.github/workflows/
+  ci.yml                pipeline de integración continua (CDM-3)
+Dockerfile              imagen de la API, con el CLI de Prisma para las migraciones
 prisma/
   schema.prisma         esquema de la base de datos (SDD 5.6)
   migrations/           migraciones versionadas, con SQL manual (ADR-005)
@@ -141,6 +144,47 @@ Prisma 7 no carga el archivo `.env`: lo cargan `prisma.config.ts`, `src/main.ts`
 - **ESLint** (`eslint.config.mjs`) con `typescript-eslint` y reglas con información de tipos. `no-floating-promises` es un error.
 - **Prettier** (`.prettierrc`) con comillas simples y coma final. ESLint informa las diferencias de formato.
 - **Jest** para las pruebas unitarias (`*.spec.ts`) y **Supertest** para las de integración (`test/*.e2e-spec.ts`).
+
+## Imagen Docker
+
+El `Dockerfile` compila la API con Node 26 y pnpm, y la imagen final contiene solo `dist/`, las dependencias de producción, `prisma/` y `prisma.config.ts`. Se ejecuta sin privilegios de root, con el usuario `node`, en el puerto `3000`.
+
+La imagen incluye el CLI de Prisma para que el initContainer de Kubernetes aplique las migraciones con la misma versión del código que se despliega (SDD 5.5):
+
+```bash
+docker build -t petcontrol-api:local .
+
+# Migraciones (initContainer)
+docker run --rm -e DATABASE_URL="<url>" petcontrol-api:local ./node_modules/.bin/prisma migrate deploy
+
+# API
+docker run --rm -p 3000:3000 -e DATABASE_URL="<url>" petcontrol-api:local
+```
+
+- La API no lee `.env` dentro de la imagen (`.dockerignore` lo excluye): las variables llegan por el entorno. Para llegar al PostgreSQL de Local desde el contenedor, usa `host.docker.internal` en lugar de `localhost` (Docker Desktop).
+- `GET /healthz` responde `ok` en texto plano para las sondas de Kubernetes y el pipeline. No consulta la base de datos, para que una caída de PostgreSQL no reinicie la API. La conexión se comprueba al iniciar: sin base de datos, la API no arranca.
+
+## Integración continua
+
+El pipeline `.github/workflows/ci.yml` (CDM-3, SDD 5.4) se ejecuta en cada PR hacia `main` y en cada push a `main`:
+
+| Job | Descripción |
+| --- | --- |
+| `version` | Lee la versión de `package.json` y falla si ya está publicada en Docker Hub. Cada PR debe subir la versión. |
+| `quality` | Comprueba el formato, revisa el código, ejecuta las pruebas unitarias y compila. |
+| `integration` | Aplica las migraciones en un PostgreSQL 17 temporal y ejecuta las pruebas de integración. |
+| `smoke` | Construye la imagen, aplica las migraciones con ella como el initContainer, levanta la API contra un PostgreSQL 17 temporal y comprueba `/healthz` y que no se ejecute como root. |
+| `publish` | Solo en push a `main` y si los demás jobs se aprueban: publica la misma imagen probada con las etiquetas `<versión>` y `latest`. |
+
+Secretos requeridos en el repositorio de GitHub:
+
+| Secreto | Uso |
+| --- | --- |
+| `DOCKERHUB_USERNAME` | Usuario de Docker Hub. |
+| `DOCKERHUB_TOKEN` | Token de acceso de Docker Hub con permiso de escritura. |
+| `DOCKERHUB_ORGANIZATION` | Organización donde se publica `petcontrol-api`. |
+
+Las pruebas de sistema con Playwright están en `petcontrol-web` y por ahora no llaman a la API. Cuando la aplicación web consuma la API, el pipeline de la API ejecutará esas pruebas antes de publicar (SDD 5.4). El despliegue en el servidor mediante Twingate se configura en CDM-29.
 
 ## Flujo de trabajo
 
